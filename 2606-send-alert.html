@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ErrorAlert 錯誤警報系統 - 功能規劃建議書</title>
+
+<!-- Tailwind CDN -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- Alpine.js -->
+<script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+<!-- Mermaid -->
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
+</script>
+
+<style>
+  :root {
+    --bg: #0f172a;
+    --card-bg: #1e293b;
+    --ink: #f8fafc;
+    --ink-soft: #94a3b8;
+    --accent: #38bdf8;
+    --border: #334155;
+  }
+  html, body { background: var(--bg); }
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+    color: var(--ink-soft);
+    line-height: 1.65;
+    margin: 0;
+  }
+  main.doc {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 4rem 1.5rem 8rem;
+  }
+  .doc h1 { font-size: 2.25rem; line-height: 1.2; color: var(--ink); font-weight: 700; letter-spacing: -.01em; margin: 0 0 .5rem; }
+  .doc h2 { font-size: 1.5rem; line-height: 1.3; color: var(--ink); font-weight: 600; margin: 3rem 0 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+  .doc h3 { font-size: 1.125rem; color: var(--ink); font-weight: 600; margin: 2rem 0 .75rem; }
+  .doc p  { margin: 0 0 1rem; }
+  .doc ul, .doc ol { margin: 0 0 1rem; padding-left: 1.25rem; }
+  .doc li { margin: .25rem 0; }
+  .doc strong { color: var(--ink); font-weight: 600; }
+  .doc code { background: #334155; color: #f8fafc; padding: .1em .35em; border-radius: 4px; font-size: .9em; }
+  .doc hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+  .doc table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: .95rem; }
+  .doc th, .doc td { border-bottom: 1px solid var(--border); padding: .6rem .5rem; text-align: left; vertical-align: top; }
+  .doc th { color: var(--ink); font-weight: 600; }
+  .doc .callout {
+    border-left: 3px solid var(--accent);
+    padding: .5rem 0 .5rem 1rem;
+    margin: 1.25rem 0;
+    color: var(--ink);
+    background: #1e293b;
+    border-radius: 0 8px 8px 0;
+  }
+  .doc .meta { font-size: .85rem; color: var(--accent); margin: 0 0 1rem; }
+</style>
+</head>
+<body>
+
+<main class="doc">
+  <p class="meta">2026-06-02 · Nuwa Technical Proposal</p>
+  <h1>ErrorAlert 錯誤警報系統建議規劃書</h1>
+  
+  <p class="text-lg text-slate-300 mb-6">
+    為確保系統的簡訊 (SMS)、信件 (Email) 及推播 (Push) 發送失敗，以及與 HIS 同步等業務發生異常時，能夠即時但「控頻不洗版」地通知維運人員。本文件提供可點擊操作的模擬介面，以驗證設計之正確性。
+  </p>
+
+  <div class="callout">
+    <strong>核心架構決定：</strong>
+    本系統排除 File Log 的解析，僅針對已寫入 DB 或主動呼叫警報 API 的事件進行「動態計數與冷卻」。
+  </div>
+
+  <!-- 互動模擬器區塊 -->
+  <h2 class="text-2xl font-semibold mt-8 text-white">1. 機制驗證：ErrorAlert 即時互動模擬器</h2>
+  <p class="mb-4">
+    您可以點擊下方按鈕模擬系統錯誤的發生，體驗「動態 10 分鐘計數」與「60 分鐘跨區間冷卻」是如何有效阻斷警報疲勞。
+  </p>
+
+  <!-- Alpine.js 應用程式 -->
+  <div x-data="alertSimulator()" class="bg-[#1e293b] rounded-xl border border-slate-700 p-6 my-6 text-slate-200">
+    <div class="flex justify-between items-center mb-6 border-b border-slate-700 pb-4">
+      <div class="flex items-center gap-3">
+        <span class="text-xs uppercase bg-sky-500 text-slate-900 font-bold px-2.5 py-1 rounded">互動模擬器</span>
+        <span class="text-sm font-semibold text-slate-300">模擬當前時間: <span class="text-sky-400 font-mono text-base" x-text="formatTime(simulatedTime)"></span></span>
+      </div>
+      <div class="flex gap-2">
+        <button @click="addTime(1)" class="bg-slate-700 hover:bg-slate-600 text-xs px-3 py-1.5 rounded transition font-semibold">+ 1 分鐘</button>
+        <button @click="addTime(10)" class="bg-slate-700 hover:bg-slate-600 text-xs px-3 py-1.5 rounded transition font-semibold">+ 10 分鐘</button>
+        <button @click="addTime(60)" class="bg-slate-700 hover:bg-slate-600 text-xs px-3 py-1.5 rounded transition font-semibold">+ 60 分鐘</button>
+        <button @click="reset()" class="bg-red-900/60 hover:bg-red-800 text-xs px-3 py-1.5 rounded transition font-semibold text-red-200">重置模擬</button>
+      </div>
+    </div>
+
+    <!-- 模擬操作面板 -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      
+      <!-- 控制台 -->
+      <div class="space-y-4">
+        <h3 class="text-white font-semibold text-base">操作控制台 (模擬發生錯誤)</h3>
+        
+        <div class="bg-slate-800/60 p-4 rounded-lg border border-slate-700 space-y-3">
+          <label class="block text-xs font-semibold text-slate-400">1. 選擇錯誤類型 (已在 Seed 註冊並啟用)</label>
+          <div class="grid grid-cols-2 gap-2">
+            <button @click="selectedError = 'SMS_FAILED'" :class="selectedError === 'SMS_FAILED' ? 'border-sky-500 bg-sky-950 text-sky-400' : 'border-slate-700 bg-slate-800 text-slate-400'" class="border p-2 rounded text-xs transition font-semibold">
+              SMS_FAILED (閥值: 3)
+            </button>
+            <button @click="selectedError = 'EMAIL_FAILED'" :class="selectedError === 'EMAIL_FAILED' ? 'border-sky-500 bg-sky-950 text-sky-400' : 'border-slate-700 bg-slate-800 text-slate-400'" class="border p-2 rounded text-xs transition font-semibold">
+              EMAIL_FAILED (閥值: 5)
+            </button>
+          </div>
+          
+          <div class="pt-2">
+            <label class="block text-xs font-semibold text-slate-400 mb-1">2. 錯誤訊息說明</label>
+            <input type="text" x-model="errorMessage" class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-xs text-white" />
+          </div>
+
+          <button @click="triggerError()" class="w-full bg-sky-500 hover:bg-sky-400 text-slate-900 font-bold p-2.5 rounded text-sm transition mt-2 shadow-lg">
+            觸發 ErrorAlert::trigger()
+          </button>
+        </div>
+
+        <!-- 警報 Config 狀態 -->
+        <div class="bg-slate-800/40 p-4 rounded-lg border border-slate-700 space-y-2">
+          <h4 class="text-xs font-bold text-slate-400">警報規則設定明細</h4>
+          <div class="space-y-2 text-xs">
+            <div class="flex justify-between bg-slate-800 p-2 rounded">
+              <span>SMS_FAILED (簡訊)</span>
+              <span class="text-slate-300">閥值: 3 次 / 冷卻: 60 分鐘 / 最後發送: <span class="font-mono text-sky-400" x-text="formatTime(configs.SMS_FAILED.last_sent_at)"></span></span>
+            </div>
+            <div class="flex justify-between bg-slate-800 p-2 rounded">
+              <span>EMAIL_FAILED (郵件)</span>
+              <span class="text-slate-300">閥值: 5 次 / 冷卻: 60 分鐘 / 最後發送: <span class="font-mono text-sky-400" x-text="formatTime(configs.EMAIL_FAILED.last_sent_at)"></span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 狀態面板 -->
+      <div class="space-y-4">
+        <h3 class="text-white font-semibold text-base">模擬資料庫狀態監控</h3>
+        
+        <!-- 計數器狀況 -->
+        <div class="bg-slate-900 rounded-lg p-4 border border-slate-700 h-[180px] overflow-y-auto">
+          <h4 class="text-xs font-bold text-slate-400 mb-2 border-b border-slate-800 pb-1 flex justify-between">
+            <span>計數器資料表 (error_alert_counters)</span>
+            <span class="text-[10px] text-slate-500">動態時間區間 (10分)</span>
+          </h4>
+          <div class="space-y-2">
+            <template x-if="counters.length === 0">
+              <p class="text-xs text-slate-600 text-center py-8">目前無累積計數紀錄</p>
+            </template>
+            <template x-for="c in counters" :key="c.id">
+              <div class="border border-slate-800 bg-slate-800/30 p-2.5 rounded text-xs space-y-1">
+                <div class="flex justify-between">
+                  <span class="font-semibold text-slate-300" x-text="c.error_type"></span>
+                  <span class="text-sky-400 font-bold">累積: <span class="text-lg" x-text="c.current_count"></span> 次</span>
+                </div>
+                <div class="text-[10px] text-slate-500 flex justify-between">
+                  <span>區間起點 (created_at): <span class="font-mono" x-text="formatTime(c.created_at)"></span></span>
+                  <span>最後更新: <span class="font-mono" x-text="formatTime(c.updated_at)"></span></span>
+                </div>
+                <p class="text-[11px] text-amber-500 italic bg-amber-950/20 px-1 py-0.5 rounded truncate" x-text="'最後錯誤: ' + c.last_error_message"></p>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- 警報發送歷史 -->
+        <div class="bg-slate-900 rounded-lg p-4 border border-slate-700 h-[180px] overflow-y-auto">
+          <h4 class="text-xs font-bold text-slate-400 mb-2 border-b border-slate-800 pb-1">
+            發送出的警報通知 (error_alert_logs / 簡訊 / Email)
+          </h4>
+          <div class="space-y-2">
+            <template x-if="logs.length === 0">
+              <p class="text-xs text-slate-600 text-center py-8">目前尚無發送警報</p>
+            </template>
+            <template x-for="l in logs" :key="l.time">
+              <div class="bg-emerald-950/20 border border-emerald-800/40 p-2.5 rounded text-xs space-y-1">
+                <div class="flex justify-between text-emerald-400 font-bold">
+                  <span x-text="'🔔 [警報發送] ' + l.error_type"></span>
+                  <span class="font-mono text-[10px]" x-text="formatTime(l.time)"></span>
+                </div>
+                <p class="text-[11px] text-slate-300" x-text="'內容: ' + l.content"></p>
+              </div>
+            </template>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- 系統時序 -->
+  <h2 class="text-2xl font-semibold mt-12 text-white">2. 警報判定流程</h2>
+  <p class="mb-4">
+    每當發生錯誤並調用 <code>ErrorAlert::trigger()</code> 時，系統在後端進行的完整判定流程圖：
+  </p>
+
+  <div class="bg-[#1e293b] rounded-lg border border-slate-700 p-6 flex justify-center my-6">
+    <div class="mermaid text-slate-200">
+      flowchart TD
+          A["呼叫 ErrorAlert::trigger($key, $details)"] --> B{"DB 中是否有此 config?"}
+          B -- 否 --> C["1. 動態補救新增該 config <br> 設定 is_enabled = 0 <br> 其他欄位設為預設或 NULL <br> 自動產生 UUID，admin_id = NULL"]
+          C --> E["結束流程 <br> (第一次錯誤不發送警報)"]
+          B -- 是 --> D{"config.is_enabled == 1?"}
+          D -- 否 --> E
+          D -- 是 --> F{"2. 查詢該 error_type 最新的一筆計數器?"}
+          F -- 有 --> G{"3. 該列 created_at >= NOW - 10 分鐘?"}
+          F -- 無 --> H["4. 執行 SQL INSERT <br> count = 1 <br> created_at / updated_at = NOW"]
+          G -- 是 --> I["5. 執行 SQL UPDATE <br> current_count = current_count + 1 <br> last_error_message = $details <br> updated_at = NOW"]
+          G -- 否 --> H
+          H --> E
+          I --> J{"檢查該區間的 count >= 閥值?"}
+          J -- 否 --> E
+          J -- 是 --> K{"檢查當前時間與 config.last_sent_at <br> 是否大於 cooldown_minutes?"}
+          K -- 否 --> E
+          K -- 是 --> L["6. 觸發警報發送 <br> 帶入最後一次錯誤訊息"]
+          L --> M["7. 更新 config.last_sent_at = NOW"]
+    </div>
+  </div>
+
+  <!-- 資料表設計 -->
+  <h2 class="text-2xl font-semibold mt-12 text-white">3. 資料表設計 (3張核心表)</h2>
+  
+  <h3 class="text-white text-base font-semibold mt-4">3.1 警報設定表 <code>error_alert_configs</code></h3>
+  <table class="text-slate-300">
+    <thead>
+      <tr class="border-b border-slate-700">
+        <th class="w-1/4">欄位名</th>
+        <th class="w-1/4">類型</th>
+        <th>說明</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>id</td><td>INT (PK)</td><td>自增識別碼</td></tr>
+      <tr><td>uuid</td><td>CHAR(36)</td><td>唯一識別碼 (UNIQUE，用於 API 識別)</td></tr>
+      <tr><td>error_type</td><td>VARCHAR</td><td>錯誤類型 KEY (UNIQUE，來自 Enum)</td></tr>
+      <tr><td>threshold_count</td><td>INT</td><td>觸發閥值（達到此值發送警告，如 5）</td></tr>
+      <tr><td>check_interval</td><td>INT</td><td>檢測區間（單位：分鐘，預設如 10）</td></tr>
+      <tr><td>cooldown_minutes</td><td>INT</td><td>冷卻時間（單位：分鐘，預設如 60）</td></tr>
+      <tr><td>sms_template</td><td>TEXT</td><td>簡訊內容範本</td></tr>
+      <tr><td>email_template</td><td>TEXT</td><td>Email 內容範本</td></tr>
+      <tr><td>is_enabled</td><td>TINYINT</td><td>是否啟用 (0: 停用, 1: 啟用)</td></tr>
+      <tr><td>admin_id</td><td>INT</td><td>最後更新人員 ID (外鍵，指向 sys_users.id)</td></tr>
+      <tr><td>last_sent_at</td><td>DATETIME</td><td>最後一次發送警報時間 (跨區間冷卻判定基準)</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="text-white text-base font-semibold mt-6">3.2 通知聯絡人主表 <code>error_alert_recipients</code></h3>
+  <table class="text-slate-300">
+    <thead>
+      <tr class="border-b border-slate-700">
+        <th class="w-1/4">欄位名</th>
+        <th class="w-1/4">類型</th>
+        <th>說明</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>id</td><td>INT (PK)</td><td>自增識別碼</td></tr>
+      <tr><td>uuid</td><td>CHAR(36)</td><td>唯一識別碼 (UNIQUE)</td></tr>
+      <tr><td>recipient_name</td><td>VARCHAR</td><td>姓名</td></tr>
+      <tr><td>phone</td><td>VARCHAR</td><td>手機號碼 (簡訊發送)</td></tr>
+      <tr><td>email</td><td>VARCHAR</td><td>電子郵件 (郵件發送)</td></tr>
+      <tr><td>is_disabled</td><td>TINYINT</td><td>是否停用 (0: 啟用, 1: 停用)</td></tr>
+      <tr><td>admin_id</td><td>INT</td><td>最後更新人員 ID</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="text-white text-base font-semibold mt-6">3.3 警報計數與歷史表 <code>error_alert_counters</code></h3>
+  <p class="text-xs text-amber-400 mb-2">★ 資料庫複合索引：INDEX idx_type_created (error_type, created_at)</p>
+  <table class="text-slate-300">
+    <thead>
+      <tr class="border-b border-slate-700">
+        <th class="w-1/4">欄位名</th>
+        <th class="w-1/4">類型</th>
+        <th>說明</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>id</td><td>INT (PK)</td><td>自增識別碼</td></tr>
+      <tr><td>error_type</td><td>VARCHAR</td><td>錯誤類型 KEY</td></tr>
+      <tr><td>current_count</td><td>INT</td><td>此區間內累計錯誤次數</td></tr>
+      <tr><td>last_error_message</td><td>TEXT</td><td>此區間最後一次發生的錯誤訊息</td></tr>
+      <tr><td>created_at</td><td>DATETIME</td><td>此輪第一次發生時間 (代表區間起點)</td></tr>
+      <tr><td>updated_at</td><td>DATETIME</td><td>此輪最後一次更新時間</td></tr>
+    </tbody>
+  </table>
+
+</main>
+
+<script>
+  function alertSimulator() {
+    // 模擬當前時間（以毫秒時間戳模擬）
+    let baseTime = new Date('2026-06-02 12:00:00').getTime();
+    
+    return {
+      simulatedTime: baseTime,
+      selectedError: 'SMS_FAILED',
+      errorMessage: 'SMS Gateway connection timeout (code 504)',
+      
+      // 警報 Config
+      configs: {
+        SMS_FAILED: { threshold: 3, check_interval: 10, cooldown: 60, last_sent_at: null },
+        EMAIL_FAILED: { threshold: 5, check_interval: 10, cooldown: 60, last_sent_at: null }
+      },
+      
+      // 模擬資料庫
+      counters: [],
+      logs: [],
+      counterIdCounter: 1,
+
+      // 格式化時間
+      formatTime(ts) {
+        if (!ts) return '無';
+        let d = new Date(ts);
+        return d.toTimeString().split(' ')[0];
+      },
+
+      // 時間前進
+      addTime(minutes) {
+        this.simulatedTime += minutes * 60 * 1000;
+      },
+
+      // 重置
+      reset() {
+        this.simulatedTime = baseTime;
+        this.counters = [];
+        this.logs = [];
+        this.configs.SMS_FAILED.last_sent_at = null;
+        this.configs.EMAIL_FAILED.last_sent_at = null;
+        this.counterIdCounter = 1;
+      },
+
+      // 觸發錯誤
+      triggerError() {
+        let type = this.selectedError;
+        let details = this.errorMessage;
+        let config = this.configs[type];
+        
+        // 1. 尋找近 10 分鐘內的計數器
+        let tenMinsAgo = this.simulatedTime - (10 * 60 * 1000);
+        let activeCounter = this.counters.find(c => c.error_type === type && c.created_at >= tenMinsAgo);
+        
+        if (activeCounter) {
+          // UPDATE
+          activeCounter.current_count++;
+          activeCounter.last_error_message = details;
+          activeCounter.updated_at = this.simulatedTime;
+        } else {
+          // INSERT
+          activeCounter = {
+            id: this.counterIdCounter++,
+            error_type: type,
+            current_count: 1,
+            last_error_message: details,
+            created_at: this.simulatedTime,
+            updated_at: this.simulatedTime
+          };
+          // 放在最前面
+          this.counters.unshift(activeCounter);
+        }
+
+        // 2. 閥值判定
+        if (activeCounter.current_count >= config.threshold) {
+          // 3. 冷卻判定
+          let isCooledDown = true;
+          if (config.last_sent_at) {
+            let nextAvailableSend = config.last_sent_at + (config.cooldown * 60 * 1000);
+            if (this.simulatedTime < nextAvailableSend) {
+              isCooledDown = false;
+            }
+          }
+
+          if (isCooledDown) {
+            // 發送警報
+            let channel = type === 'SMS_FAILED' ? '簡訊' : 'Email';
+            this.logs.unshift({
+              time: this.simulatedTime,
+              error_type: type,
+              content: `【${channel}警報】偵測到 ${type} 異常，近 10 分鐘內累計失敗 ${activeCounter.current_count} 筆。最後一筆原因: ${details}`
+            });
+            // 更新最後發送時間
+            config.last_sent_at = this.simulatedTime;
+          }
+        }
+      }
+    };
+  }
+</script>
+
+<!-- comment overlay: highlight any text, write comment, one-click export markdown to clipboard -->
+<script src="./comment-overlay.js"></script>
+
+</body>
+</html>
